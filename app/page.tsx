@@ -12,6 +12,12 @@ type Session = {
   role: Role;
 };
 
+type UploadedFile = null | {
+  name: string;
+  size: number;
+  type: string;
+};
+
 type Vendor = {
   id: string;
   createdAt: string;
@@ -25,12 +31,12 @@ type Vendor = {
   bankAccountNumber: string;
   bankAddress: string;
   swiftCode: string;
+  accountCurrency: string;
   npwpNumber: string;
-  ktpUpload: null | {
-    name: string;
-    size: number;
-    type: string;
-  };
+  ktpUpload: UploadedFile;
+  pphFinalUmkmUpload: UploadedFile;
+  informationConfirmed: boolean;
+  taxAcknowledged: boolean;
 };
 
 type VendorDraft = Omit<Vendor, "id" | "createdAt">;
@@ -114,6 +120,24 @@ const storageKeys = {
 };
 
 const currencyOptions = ["SGD", "IDR", "USD"];
+const vendorAccountCurrencies = [
+  ["IDR", "Indonesian Rupiah"],
+  ["SGD", "Singapore Dollar"],
+  ["USD", "US Dollar"],
+  ["AUD", "Australian Dollar"],
+  ["CAD", "Canadian Dollar"],
+  ["CHF", "Swiss Franc"],
+  ["CNY", "Chinese Yuan"],
+  ["EUR", "Euro"],
+  ["GBP", "British Pound"],
+  ["HKD", "Hong Kong Dollar"],
+  ["JPY", "Japanese Yen"],
+  ["KRW", "South Korean Won"],
+  ["MYR", "Malaysian Ringgit"],
+  ["NZD", "New Zealand Dollar"],
+  ["THB", "Thai Baht"],
+  ["VND", "Vietnamese Dong"]
+] as const;
 const allowedEmailDomain = "goodstuph.org";
 const adminEmails = parseEmailList(process.env.NEXT_PUBLIC_ADMIN_EMAILS || "");
 const reviewerEmails = parseEmailList(process.env.NEXT_PUBLIC_REVIEWER_EMAILS || "");
@@ -129,8 +153,12 @@ const emptyVendor: VendorDraft = {
   bankAccountNumber: "",
   bankAddress: "",
   swiftCode: "",
+  accountCurrency: "",
   npwpNumber: "",
-  ktpUpload: null
+  ktpUpload: null,
+  pphFinalUmkmUpload: null,
+  informationConfirmed: false,
+  taxAcknowledged: false
 };
 
 function id() {
@@ -478,7 +506,8 @@ export default function Home() {
       ["Bank name", vendorForm.bankName],
       ["Bank account number", vendorForm.bankAccountNumber],
       ["Bank address", vendorForm.bankAddress],
-      ["SWIFT code", vendorForm.swiftCode]
+      ["SWIFT code", vendorForm.swiftCode],
+      ["Account currency", vendorForm.accountCurrency]
     ].forEach(([label, value]) => {
       if (!String(value).trim()) errors.push(`${label} is required.`);
     });
@@ -499,6 +528,12 @@ export default function Home() {
     if (!digits(vendorForm.npwpNumber) && !vendorForm.ktpUpload) {
       errors.push("Upload KTP when NPWP is unavailable.");
     }
+    if (!vendorForm.informationConfirmed) {
+      errors.push("Confirm that the information entered is correct.");
+    }
+    if (!vendorForm.taxAcknowledged) {
+      errors.push("Acknowledge the withholding tax and Coretax statement.");
+    }
 
     return errors;
   }
@@ -509,15 +544,6 @@ export default function Home() {
     setVendorErrors(errors);
     if (errors.length) {
       setVendorStatus("Please fix the highlighted details.");
-      return;
-    }
-
-    const confirmed = window.confirm(
-      "I confirm that the information submitted is true and correct. Any mistake will result in a delay in the disbursement of payments"
-    );
-
-    if (!confirmed) {
-      setVendorStatus("Submission cancelled.");
       return;
     }
 
@@ -716,24 +742,25 @@ export default function Home() {
               <span className="block truncate text-[10px] uppercase tracking-[0.35em] text-red-100/55">GOODSTUPH Indonesia</span>
             </span>
           </button>
-          <nav className="flex min-w-0 max-w-[62vw] flex-nowrap justify-end gap-2 overflow-x-auto py-3 sm:max-w-none">
-            {!isInternalRoute && <NavButton active={view === "register"} onClick={() => go("register")}>Register</NavButton>}
-            {isInternalRoute && !session && <NavButton active={view === "login"} onClick={() => go("login")}>Login</NavButton>}
-            {protectedButton("vendors", "Vendors")}
-            {protectedButton("estimates", "Estimates")}
-            {protectedButton("payments", "Payments")}
-            {isInternalRoute && session && (
-              <button
-                className="shrink-0 whitespace-nowrap rounded-full border border-red-100/15 px-3 py-2 text-xs uppercase tracking-[0.22em] text-red-50/70 transition hover:border-red-100/40 hover:text-red-50"
-                onClick={() => {
-                  void signOut();
-                }}
-                type="button"
-              >
-                Logout
-              </button>
-            )}
-          </nav>
+          {isInternalRoute && (
+            <nav className="flex min-w-0 max-w-[62vw] flex-nowrap justify-end gap-2 overflow-x-auto py-3 sm:max-w-none">
+              {!session && <NavButton active={view === "login"} onClick={() => go("login")}>Login</NavButton>}
+              {protectedButton("vendors", "Vendors")}
+              {protectedButton("estimates", "Estimates")}
+              {protectedButton("payments", "Payments")}
+              {session && (
+                <button
+                  className="shrink-0 whitespace-nowrap rounded-full border border-red-100/15 px-3 py-2 text-xs uppercase tracking-[0.22em] text-red-50/70 transition hover:border-red-100/40 hover:text-red-50"
+                  onClick={() => {
+                    void signOut();
+                  }}
+                  type="button"
+                >
+                  Logout
+                </button>
+              )}
+            </nav>
+          )}
         </header>
 
         <div
@@ -761,12 +788,18 @@ export default function Home() {
           <div className={`reveal rounded-[2rem] border border-red-100/10 bg-black/38 p-4 shadow-ember backdrop-blur-xl sm:p-5 ${isInternalRoute ? "lg:p-7" : ""}`}>
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
-                <p className="text-xs uppercase tracking-[0.34em] text-red-100/50">current module</p>
-                <h2 className="mt-1 text-2xl font-black tracking-tight">{viewTitle(view)}</h2>
+                <h2 className="text-2xl font-black tracking-tight">{viewTitle(view)}</h2>
+                {view === "register" && (
+                  <p className="mt-2 max-w-2xl text-sm leading-6 text-red-50/66">
+                    Enter your details exactly as they appear in your bank records. Complete all required fields before submitting.
+                  </p>
+                )}
               </div>
-              <p className="rounded-full bg-red-950/80 px-3 py-2 text-xs uppercase tracking-[0.2em] text-red-50/70">
-                {isInternalRoute ? (session ? `${session.name} / ${session.role}` : "internal") : "public"}
-              </p>
+              {isInternalRoute && session && (
+                <p className="rounded-full bg-red-950/80 px-3 py-2 text-xs uppercase tracking-[0.2em] text-red-50/70">
+                  {session.name} / {session.role}
+                </p>
+              )}
             </div>
             {view === "register" && (
               <VendorRegistration
@@ -885,7 +918,10 @@ function VendorRegistration({
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   status: string;
 }) {
-  function setField(name: Exclude<keyof VendorDraft, "ktpUpload">, value: string) {
+  function setField(
+    name: Exclude<keyof VendorDraft, "ktpUpload" | "pphFinalUmkmUpload" | "informationConfirmed" | "taxAcknowledged">,
+    value: string
+  ) {
     onChange({ ...form, [name]: value });
   }
 
@@ -895,29 +931,65 @@ function VendorRegistration({
         <Field label="Company / Individual name" value={form.vendorName} onChange={(value) => setField("vendorName", value)} />
         <Field label="Person in charge" value={form.picName} onChange={(value) => setField("picName", value)} />
         <Field label="PIC contact number" value={form.picContactNumber} onChange={(value) => setField("picContactNumber", value)} />
-        <Field label="Email address" type="email" value={form.email} onChange={(value) => setField("email", value)} />
+        <Field
+          helper="Payment slips will be sent here."
+          label="Email address"
+          type="email"
+          value={form.email}
+          onChange={(value) => setField("email", value)}
+        />
         <Field label="Bank account name" value={form.bankAccountName} onChange={(value) => setField("bankAccountName", value)} />
         <Field label="Bank name" value={form.bankName} onChange={(value) => setField("bankName", value)} />
         <Field label="Bank account number" value={form.bankAccountNumber} onChange={(value) => setField("bankAccountNumber", value)} />
+        <label className={labelClass}>
+          Account currency
+          <select className={inputClass} onChange={(event) => setField("accountCurrency", event.target.value)} value={form.accountCurrency}>
+            <option value="">Select account currency</option>
+            <optgroup label="Common currencies">
+              {vendorAccountCurrencies.slice(0, 3).map(([code, name]) => <option key={code} value={code}>{code} - {name}</option>)}
+            </optgroup>
+            <optgroup label="Other major currencies">
+              {vendorAccountCurrencies.slice(3).map(([code, name]) => <option key={code} value={code}>{code} - {name}</option>)}
+            </optgroup>
+          </select>
+        </label>
         <Field label="SWIFT code" value={form.swiftCode} onChange={(value) => setField("swiftCode", value.toUpperCase())} />
         <TextArea label="Address as per bank account" value={form.bankAccountAddress} onChange={(value) => setField("bankAccountAddress", value)} />
         <TextArea label="Bank address" value={form.bankAddress} onChange={(value) => setField("bankAddress", value)} />
-        <Field label="NPWP number" value={form.npwpNumber} onChange={(value) => setField("npwpNumber", value)} />
-        <label className={labelClass}>
-          Upload KTP
-          <input
-            className={inputClass}
-            onChange={(event) => {
-              const file = event.target.files?.[0];
-              onChange({
-                ...form,
-                ktpUpload: file ? { name: file.name, size: file.size, type: file.type || "Unknown" } : null
-              });
-            }}
-            type="file"
-          />
-        </label>
+        <Field helper="16 digits." label="NPWP number" value={form.npwpNumber} onChange={(value) => setField("npwpNumber", value)} />
+        <FileUploadField
+          helper="Required when NPWP is unavailable."
+          label="Upload KTP"
+          onChange={(file) => onChange({ ...form, ktpUpload: file })}
+        />
+        <FileUploadField
+          className="sm:col-span-2"
+          helper="Upload only when applicable."
+          label="Surat Keterangan PPh Final UMKM"
+          onChange={(file) => onChange({ ...form, pphFinalUmkmUpload: file })}
+        />
       </div>
+      <fieldset className={sectionClass + " grid gap-3"}>
+        <legend className="px-1 text-xs uppercase tracking-[0.22em] text-red-50/62">Declaration</legend>
+        <label className="flex items-start gap-3 text-sm leading-6 text-red-50/78">
+          <input
+            checked={form.informationConfirmed}
+            className="mt-1 h-4 w-4 shrink-0 accent-red-500"
+            onChange={(event) => onChange({ ...form, informationConfirmed: event.target.checked })}
+            type="checkbox"
+          />
+          <span>I agree that the information entered is correct and acknowledge that any errors will result in payment delays.</span>
+        </label>
+        <label className="flex items-start gap-3 text-sm leading-6 text-red-50/78">
+          <input
+            checked={form.taxAcknowledged}
+            className="mt-1 h-4 w-4 shrink-0 accent-red-500"
+            onChange={(event) => onChange({ ...form, taxAcknowledged: event.target.checked })}
+            type="checkbox"
+          />
+          <span>I acknowledge that payments are subject to withholding tax PPh 21 or PPh 23 and the bukti potong will be processed via Coretax.</span>
+        </label>
+      </fieldset>
       <Status errors={errors} status={status} />
       <button className={actionClass} type="submit">Submit registration</button>
     </form>
@@ -956,6 +1028,7 @@ function VendorList({ vendors }: { vendors: Vendor[] }) {
             <Detail label="Contact" value={`${vendor.picContactNumber} / ${vendor.email}`} />
             <Detail label="Bank" value={`${vendor.bankName} - ${vendor.bankAccountNumber}`} />
             <Detail label="Account name" value={vendor.bankAccountName} />
+            <Detail label="Account currency" value={vendor.accountCurrency} />
             <Detail label="SWIFT" value={vendor.swiftCode} />
           </dl>
         </article>
@@ -1192,6 +1265,7 @@ function PaymentRequests({
 
 function Field({
   datalist,
+  helper,
   label,
   onBlur,
   onChange,
@@ -1199,6 +1273,7 @@ function Field({
   value
 }: {
   datalist?: string;
+  helper?: string;
   label: string;
   onBlur?: () => void;
   onChange: (value: string) => void;
@@ -1208,7 +1283,35 @@ function Field({
   return (
     <label className={labelClass}>
       {label}
+      {helper && <span className="-mt-1 normal-case text-[11px] leading-4 tracking-normal text-red-100/48">{helper}</span>}
       <input className={inputClass} list={datalist} onBlur={onBlur} onChange={(event) => onChange(event.target.value)} type={type} value={value} />
+    </label>
+  );
+}
+
+function FileUploadField({
+  className = "",
+  helper,
+  label,
+  onChange
+}: {
+  className?: string;
+  helper: string;
+  label: string;
+  onChange: (file: UploadedFile) => void;
+}) {
+  return (
+    <label className={`${labelClass} ${className}`}>
+      {label}
+      <span className="-mt-1 normal-case text-[11px] leading-4 tracking-normal text-red-100/48">{helper}</span>
+      <input
+        className={inputClass}
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          onChange(file ? { name: file.name, size: file.size, type: file.type || "Unknown" } : null);
+        }}
+        type="file"
+      />
     </label>
   );
 }

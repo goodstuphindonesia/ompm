@@ -21,10 +21,16 @@ create table if not exists vendors (
   bank_account_number text not null,
   bank_address text not null,
   swift_code text not null,
+  account_currency text not null default 'IDR',
   npwp_number text,
   ktp_file_name text,
   ktp_file_url text,
   ktp_file_metadata jsonb,
+  pph_final_umkm_file_name text,
+  pph_final_umkm_file_url text,
+  pph_final_umkm_file_metadata jsonb,
+  information_confirmed boolean not null default false,
+  tax_acknowledged boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   constraint vendors_npwp_or_ktp check (
@@ -33,6 +39,13 @@ create table if not exists vendors (
     or nullif(ktp_file_name, '') is not null
   )
 );
+
+alter table vendors add column if not exists account_currency text not null default 'IDR';
+alter table vendors add column if not exists pph_final_umkm_file_name text;
+alter table vendors add column if not exists pph_final_umkm_file_url text;
+alter table vendors add column if not exists pph_final_umkm_file_metadata jsonb;
+alter table vendors add column if not exists information_confirmed boolean not null default false;
+alter table vendors add column if not exists tax_acknowledged boolean not null default false;
 
 create table if not exists clients (
   id uuid primary key default gen_random_uuid(),
