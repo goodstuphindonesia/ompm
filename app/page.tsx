@@ -2,8 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { usePathname } from "next/navigation";
-import type { User } from "@supabase/supabase-js";
-import { supabase } from "../lib/supabase";
+import { signIn, signOut as signOutWithAuth, useSession } from "next-auth/react";
 
 type Role = "user" | "admin" | "reviewer";
 type View = "register" | "login" | "vendors" | "estimates" | "payments";
@@ -111,8 +110,7 @@ type PaymentRequest = {
 const storageKeys = {
   vendors: "finance-platform-vendors",
   estimates: "finance-platform-estimates",
-  payments: "finance-platform-payment-requests",
-  session: "finance-platform-session"
+  payments: "finance-platform-payment-requests"
 };
 
 const currencyOptions = ["SGD", "IDR", "USD"];
@@ -164,7 +162,7 @@ function roleForEmail(email: string): Role {
   return "user";
 }
 
-function sessionFromUser(user: User): Session | null {
+function sessionFromUser(user: { email?: string | null; name?: string | null }): Session | null {
   const email = user.email;
 
   if (!email || !isAllowedEmail(email)) {
@@ -172,7 +170,7 @@ function sessionFromUser(user: User): Session | null {
   }
 
   return {
-    name: String(user.user_metadata?.full_name || user.user_metadata?.name || email),
+    name: user.name || email,
     role: roleForEmail(email)
   };
 }
@@ -367,7 +365,8 @@ export default function Home() {
   const [vendors, setVendors] = useLocalStorageState<Vendor[]>(storageKeys.vendors, []);
   const [estimates, setEstimates] = useLocalStorageState<Estimate[]>(storageKeys.estimates, []);
   const [payments, setPayments] = useLocalStorageState<PaymentRequest[]>(storageKeys.payments, []);
-  const [session, setSession] = useLocalStorageState<Session | null>(storageKeys.session, null);
+  const [session, setSession] = useState<Session | null>(null);
+  const { data: authSession, status: authState } = useSession();
 
   const [view, setView] = useState<View>("register");
   const [vendorForm, setVendorForm] = useState(emptyVendor);
@@ -389,56 +388,38 @@ export default function Home() {
   useEffect(() => {
     if (!isInternalRoute) return;
 
-    if (!supabase) {
-      setSession(null);
-      setAuthStatus("Supabase authentication is not configured yet.");
+    const error = new URLSearchParams(window.location.search).get("error");
+    if (error === "AccessDenied") {
+      setAuthStatus(`Access is restricted to ${allowedEmailDomain} Google accounts.`);
+    }
+  }, [isInternalRoute]);
+
+  useEffect(() => {
+    if (!isInternalRoute) return;
+
+    if (authState === "loading") {
       return;
     }
 
-    let isMounted = true;
+    const nextSession = sessionFromUser(authSession?.user || {});
 
-    async function applyUser(user: User | null) {
-      if (!isMounted) return;
-
-      if (!user) {
-        setSession(null);
-        setView("login");
-        return;
-      }
-
-      const nextSession = sessionFromUser(user);
-
-      if (!nextSession) {
-        setSession(null);
-        setView("login");
+    if (!nextSession) {
+      setSession(null);
+      setView("login");
+      if (authState === "authenticated") {
         setAuthStatus(`Access is restricted to ${allowedEmailDomain} Google accounts.`);
-        await supabase?.auth.signOut();
-        return;
+        void signOutWithAuth({ redirect: false });
       }
-
-      setSession(nextSession);
-      setAuthStatus("");
-      setEstimate((current) => ({ ...current, preparedBy: current.preparedBy || nextSession.name }));
-      if (view === "login" || view === "register") {
-        setView("estimates");
-      }
+      return;
     }
 
-    supabase.auth.getSession().then(({ data }) => {
-      void applyUser(data.session?.user || null);
-    });
-
-    const {
-      data: { subscription }
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      void applyUser(nextSession?.user || null);
-    });
-
-    return () => {
-      isMounted = false;
-      subscription.unsubscribe();
-    };
-  }, [isInternalRoute, setSession, view]);
+    setSession(nextSession);
+    setAuthStatus("");
+    setEstimate((current) => ({ ...current, preparedBy: current.preparedBy || nextSession.name }));
+    if (view === "login" || view === "register") {
+      setView("estimates");
+    }
+  }, [authSession, authState, isInternalRoute, view]);
 
   const submittedEstimates = useMemo(
     () => estimates.filter((item) => ["Submitted for Approval", "Approved"].includes(item.status)),
@@ -554,32 +535,12 @@ export default function Home() {
   }
 
   async function signInWithGoogle() {
-    if (!supabase) {
-      setAuthStatus("Add Supabase environment variables before signing in.");
-      return;
-    }
-
-    const { error } = await supabase.auth.signInWithOAuth({
-      provider: "google",
-      options: {
-        redirectTo: `${window.location.origin}/internal`,
-        queryParams: {
-          hd: allowedEmailDomain,
-          prompt: "select_account"
-        }
-      }
-    });
-
-    if (error) {
-      setAuthStatus(error.message);
-    }
+    setAuthStatus("");
+    await signIn("google", { callbackUrl: "/internal" });
   }
 
   async function signOut() {
-    if (supabase) {
-      await supabase.auth.signOut();
-    }
-
+    await signOutWithAuth({ callbackUrl: "/internal" });
     setSession(null);
     setView("login");
   }

@@ -7,7 +7,7 @@ Mobile-first finance processing platform for GOODSTUPH Indonesia.
 - Next.js
 - Tailwind CSS
 - Neon Postgres database target
-- Supabase Google authentication, temporary
+- Auth.js Google authentication
 - Netlify deployment target
 
 ## Current Prototype Scope
@@ -45,8 +45,10 @@ http://localhost:3000/internal
 
 ```text
 DATABASE_URL
-NEXT_PUBLIC_SUPABASE_URL
-NEXT_PUBLIC_SUPABASE_ANON_KEY
+AUTH_GOOGLE_ID
+AUTH_GOOGLE_SECRET
+AUTH_SECRET
+AUTH_TRUST_HOST
 NEXT_PUBLIC_ADMIN_EMAILS
 NEXT_PUBLIC_REVIEWER_EMAILS
 ```
@@ -56,9 +58,7 @@ Admin/reviewer values should be comma-separated GOODSTUPH email addresses.
 
 ## Auth
 
-Internal access currently uses Supabase Google OAuth. The app requests Google login with the hosted-domain hint `goodstuph.org`, then verifies the returned email ends with `@goodstuph.org`. Non-GOODSTUPH accounts are signed out.
-
-Neon is the selected database provider. The next auth build can replace Supabase with Auth.js/Google OAuth and store profiles/roles in Neon.
+Internal access uses Auth.js Google OAuth. The app requests a GOODSTUPH Google account and the server verifies the Google profile is email-verified and ends with `@goodstuph.org` before creating a session.
 
 ## Database
 

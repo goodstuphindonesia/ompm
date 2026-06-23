@@ -34,45 +34,32 @@ DATABASE_URL="postgresql://USER:PASSWORD@HOST.neon.tech/DBNAME?sslmode=require&c
 
 Neon is Postgres database hosting only. KTP uploads should use a separate object storage provider later, with the file URL and metadata stored in Neon.
 
-## 3. Google Authentication, Temporary Supabase Setup
+## 3. Google Authentication
 
-In Supabase:
-
-1. Go to Authentication > Providers.
-2. Enable Google.
-3. Add the Google OAuth Client ID and Client Secret.
-4. In Authentication > URL Configuration, add:
+1. In Google Cloud Console, create or select an OAuth app.
+2. Add these authorized redirect URIs:
 
 ```text
-http://localhost:3000/internal
-https://YOUR_NETLIFY_DOMAIN.netlify.app/internal
+http://localhost:3000/api/auth/callback/google
+https://YOUR_NETLIFY_DOMAIN.netlify.app/api/auth/callback/google
 ```
 
-In Google Cloud Console:
-
-1. Create or select a Google OAuth app.
-2. Add the authorized redirect URI shown in Supabase's Google provider screen.
-3. Restrict the OAuth app to the GOODSTUPH organization where available.
-
-The app sends this Google hosted-domain hint:
+3. Create an Auth.js secret:
 
 ```text
-hd=goodstuph.org
+openssl rand -base64 32
 ```
 
-After login, the app verifies the signed-in email ends with:
+4. Add these values to `.env.local` and Netlify:
 
 ```text
-@goodstuph.org
+AUTH_GOOGLE_ID=your-google-oauth-client-id
+AUTH_GOOGLE_SECRET=your-google-oauth-client-secret
+AUTH_SECRET=your-generated-secret
+AUTH_TRUST_HOST=true
 ```
 
-Non-GOODSTUPH accounts are signed out immediately.
-
-Future auth migration:
-
-1. Replace Supabase Auth with Auth.js Google provider.
-2. Store user profiles and roles in the Neon `profiles` table.
-3. Protect all Neon writes in server routes/actions.
+The app sends Google a `goodstuph.org` hosted-domain hint and the Auth.js server verifies that the profile is email-verified and ends with `@goodstuph.org` before allowing access.
 
 ## 4. Role Configuration
 
@@ -118,8 +105,10 @@ Add these in Netlify Site configuration > Environment variables:
 
 ```text
 DATABASE_URL
-NEXT_PUBLIC_SUPABASE_URL
-NEXT_PUBLIC_SUPABASE_ANON_KEY
+AUTH_GOOGLE_ID
+AUTH_GOOGLE_SECRET
+AUTH_SECRET
+AUTH_TRUST_HOST
 NEXT_PUBLIC_ADMIN_EMAILS
 NEXT_PUBLIC_REVIEWER_EMAILS
 ```
@@ -128,7 +117,7 @@ Deploy again after setting the variables.
 
 ## 8. Current Backend Status
 
-The frontend is Supabase-authenticated, Neon is the selected database provider, and workflow records still use browser `localStorage`.
+The frontend uses Auth.js Google authentication, Neon is the selected database provider, and workflow records still use browser `localStorage`.
 
 Recommended next backend build:
 
@@ -137,5 +126,4 @@ Recommended next backend build:
 3. Move browser `localStorage` records into Neon.
 4. Add a separate KTP file storage provider.
 5. Move roles into the Neon `profiles` table.
-6. Replace temporary Supabase auth with Auth.js if we want Neon to be the only backend platform.
-7. Add email delivery for approved payment requests.
+6. Add email delivery for approved payment requests.
